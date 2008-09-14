@@ -1,0 +1,34 @@
+---
+abstract: ~
+author:
+  - 'Chris Weyl <cweyl@alumni.drew.edu>'
+build_requires:
+  Test::More: 0
+  Test::use::ok: 0
+distribution_type: module
+generated_by: 'Module::Install version 0.77'
+license: perl
+meta-spec:
+  url: http://module-build.sourceforge.net/META-spec-v1.4.html
+  version: 1.4
+name: CPANPLUS-Dist-RPM
+no_index:
+  directory:
+    - inc
+    - t
+requires:
+  CPANPLUS::Dist::Base: 0
+  CPANPLUS::Error: 0
+  Cwd: 0
+  Data::Section: 0
+  File::Basename: 0
+  File::Copy: 0
+  File::Slurp: 0
+  IPC::Cmd: 0
+  List::Util: 0
+  POSIX: 0
+  Readonly: 0
+  Template: 0
+resources:
+  license: http://dev.perl.org/licenses/
+version: 0.0.1
