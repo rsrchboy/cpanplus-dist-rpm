@@ -1,5 +1,11 @@
 Revision history for CPANPLUS-Dist-RPM
 
-0.0.1  Thu Sep 11 21:18:53 2008
+0.0.2  Sun Sep 14 18:48:33 PDT 2008
+- update Makefile.PL:
+    * all deps from CPANPLUS/Dist/RPM.pm
+    * no_index package CPANPLUS::Dist::Fedora
+- a few minor doc changes
+
+0.0.1  Thu Sep 11 21:18:53 PDT 2008
        Initial release.
 

@@ -1,5 +1,5 @@
 ---
-abstract: ~
+abstract: 'a cpanplus backend to build RPM/RedHat rpms'
 author:
   - 'Chris Weyl <cweyl@alumni.drew.edu>'
 build_requires:
@@ -16,6 +16,8 @@ no_index:
   directory:
     - inc
     - t
+  package:
+    - CPANPLUS::Dist::Fedora
 requires:
   CPANPLUS::Dist::Base: 0
   CPANPLUS::Error: 0
@@ -27,8 +29,11 @@ requires:
   IPC::Cmd: 0
   List::Util: 0
   POSIX: 0
+  Pod::POM: 0
+  Pod::POM::View::Text: 0
   Readonly: 0
   Template: 0
+  Text::Wrap: 0
 resources:
   license: http://dev.perl.org/licenses/
-version: 0.0.1
+version: 0.0.2

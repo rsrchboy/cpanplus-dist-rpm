@@ -27,7 +27,7 @@ use Readonly;
 use Text::Wrap;
 use Template;
 
-our $VERSION = '0.0.1';
+our $VERSION = '0.0.2';
 
 Readonly my $RPMDIR => do { chomp(my $d=qx[ rpm --eval %_topdir ]); $d; };
 Readonly my $PACKAGER => 
@@ -64,7 +64,7 @@ sub format_available {
 #
 # my $bool = $fedora->init;
 #
-# Sets up the C<CPANPLUS::Dist::Fedora> object for use, and return true if
+# Sets up the C<CPANPLUS::Dist::RPM> object for use, and return true if
 # everything went fine.
 #
 sub init {
@@ -276,7 +276,7 @@ sub create {
 
         # unknown error, aborting.
         if ( not $buffer =~ /^\s+Installed .but unpackaged. file.s. found:\n(.*)\z/ms ) {
-            error( "Failed to create Fedora package for '$distname': $buffer" );
+            error( "Failed to create RPM package for '$distname': $buffer" );
             # cpanplus api
             $status->created(0);
             return;
@@ -498,19 +498,19 @@ __[ pod ]__
 
 =head1 NAME
 
-CPANPLUS::Dist::Fedora - a cpanplus backend to build Fedora/RedHat rpms
+CPANPLUS::Dist::RPM - a cpanplus backend to build RPM/RedHat rpms
 
 
 
 =head1 SYNOPSIS
 
-    cpan2dist --format=CPANPLUS::Dist::Fedora Some::Random::Package
+    cpan2dist --format=CPANPLUS::Dist::RPM Some::Random::Package
 
 
 
 =head1 DESCRIPTION
 
-CPANPLUS::Dist::Fedora is a distribution class to create Fedora packages
+CPANPLUS::Dist::RPM is a distribution class to create RPM packages
 from CPAN modules, and all its dependencies. This allows you to have
 the most recent copies of CPAN modules installed, using your package
 manager of choice, but without having to wait for central repositories
@@ -527,7 +527,7 @@ Please always refer to the original CPAN package if you have questions.
 
 =head1 CLASS METHODS
 
-=head2 $bool = CPANPLUS::Dist::Fedora->format_available;
+=head2 $bool = CPANPLUS::Dist::RPM->format_available;
 
 Return a boolean indicating whether or not you can use this package to
 create and install modules in your environment.
@@ -543,7 +543,7 @@ C<gcc>.
 
 =head2 $bool = $fedora->init;
 
-Sets up the C<CPANPLUS::Dist::Fedora> object for use. Effectively creates
+Sets up the C<CPANPLUS::Dist::RPM> object for use. Effectively creates
 all the needed status accessors.
 
 Called automatically whenever you create a new C<CPANPLUS::Dist> object.
@@ -602,7 +602,7 @@ really be probed rather than assumed.
 
 =item o Long description
 
-Right now we provided the description as given by the module in it's
+Right now we provide the description as given by the module in its
 meta data. However, not all modules provide this meta data and rather
 than scanning the files in the package for it, we simply default to the
 name of the module.
@@ -614,9 +614,9 @@ name of the module.
 
 =head1 BUGS
 
-Please report any bugs or feature requests to C<< < cpanplus-dist-fedora at
+Please report any bugs or feature requests to C<< < bug-CPANPLUS-Dist-RPM at
 rt.cpan.org> >>, or through the web interface at
-L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=CPANPLUS-Dist-Fedora>.  I
+L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=CPANPLUS-Dist-RPM>.  I
 will be notified, and then you'll automatically be notified of progress
 on your bug as I make changes.
 
@@ -628,26 +628,23 @@ L<CPANPLUS::Backend>, L<CPANPLUS::Module>, L<CPANPLUS::Dist>,
 C<cpan2dist>, C<rpm>, C<yum>
 
 
-C<CPANPLUS::Dist::Fedora> development takes place on
-L<https://svn.berlios.de/svnroot/repos/web-cpan/CPANPLUS-Dist/trunk/> 
-- feel free to join us.
-
+C<CPANPLUS::Dist::RPM> development takes place at
+L<http://code.google.com/p/cpanplus-dist-rpm/>.
 
 You can also look for information on this module at:
 
 =over 4
 
 =item * AnnoCPAN: Annotated CPAN documentation
-
-L<http://annocpan.org/dist/CPANPLUS-Dist-Fedora>
+L<http://annocpan.org/dist/CPANPLUS-Dist-RPM>
 
 =item * CPAN Ratings
 
-L<http://cpanratings.perl.org/d/CPANPLUS-Dist-Fedora>
+L<http://cpanratings.perl.org/d/CPANPLUS-Dist-RPM>
 
 =item * RT: CPAN's request tracker
 
-L<http://rt.cpan.org/NoAuth/Bugs.html?Dist=CPANPLUS-Dist-Fedora>
+L<http://rt.cpan.org/NoAuth/Bugs.html?Dist=CPANPLUS-Dist-RPM>
 
 =back
 
