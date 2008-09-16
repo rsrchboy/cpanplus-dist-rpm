@@ -27,7 +27,7 @@ use Readonly;
 use Text::Wrap;
 use Template;
 
-our $VERSION = '0.0.2';
+our $VERSION = '0.0.3';
 
 Readonly my $RPMDIR => do { chomp(my $d=qx[ rpm --eval %_topdir ]); $d; };
 Readonly my $PACKAGER => 
@@ -142,7 +142,7 @@ sub prepare {
     # Figure out if we're noarch or not
     $status->is_noarch(do { first { /\.(c|xs)$/i } @files } ? 0 : 1);
 
-    my $rpmname = _mk_pkg_name($distname);
+    my $rpmname = $self->_mk_pkg_name;
     $status->rpmname( $rpmname );
 
     # check whether package has been build.
@@ -336,9 +336,12 @@ sub _is_module_build_compat {
 # will be too long as a rpm name: we'll have to cut it.
 #
 sub _mk_pkg_name {
-    my ($dist) = @_;
-    my $name = 'perl-' . $dist;
-    return $name;
+    my ($self, $dist) = @_;
+
+    # use our our dist name if we're not passed one.
+    $dist = $self->status->distname if not defined $dist;
+
+    return "perl-$dist";
 }
 
 # determine the module license. 

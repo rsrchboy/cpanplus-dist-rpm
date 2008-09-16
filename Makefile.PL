@@ -23,10 +23,13 @@ requires 'Pod::POM';
 requires 'Pod::POM::View::Text';
 requires 'POSIX';
 requires 'Readonly';
+requires 'SUPER';
 requires 'Text::Wrap';
 requires 'Template';
 # not implemented yet
 #requires 'Software::License';
+
+requires_external_bin 'rpm';
 
 extra_tests;
 

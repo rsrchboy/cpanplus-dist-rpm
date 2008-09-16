@@ -32,8 +32,9 @@ requires:
   Pod::POM: 0
   Pod::POM::View::Text: 0
   Readonly: 0
+  SUPER: 0
   Template: 0
   Text::Wrap: 0
 resources:
   license: http://dev.perl.org/licenses/
-version: 0.0.2
+version: 0.0.3

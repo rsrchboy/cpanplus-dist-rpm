@@ -1,5 +1,9 @@
 Revision history for CPANPLUS-Dist-RPM
 
+0.0.3
+- add missing requires_external_bin 'rpm' to Makefile.PL
+- mark 'SUPER' as required
+
 0.0.2  Sun Sep 14 18:48:33 PDT 2008
 - update Makefile.PL:
     * all deps from CPANPLUS/Dist/RPM.pm
