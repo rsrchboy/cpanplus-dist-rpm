@@ -1,5 +1,5 @@
 ---
-abstract: 'a cpanplus backend to build RPM/RedHat rpms'
+abstract: 'a CPANPLUS backend to build RPM'
 author:
   - 'Chris Weyl <cweyl@alumni.drew.edu>'
 build_requires:
@@ -37,4 +37,4 @@ requires:
   Text::Wrap: 0
 resources:
   license: http://dev.perl.org/licenses/
-version: 0.0.3
+version: 0.0.4

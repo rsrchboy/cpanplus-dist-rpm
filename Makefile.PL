@@ -29,7 +29,9 @@ requires 'Template';
 # not implemented yet
 #requires 'Software::License';
 
+requires_external_bin 'gcc';
 requires_external_bin 'rpm';
+requires_external_bin 'rpmbuild';
 
 extra_tests;
 

@@ -1,6 +1,11 @@
 Revision history for CPANPLUS-Dist-RPM
 
-0.0.3
+0.0.4  Tue Sep 16 2008
+- additional external bin reqs to Makefile.PL
+- split out some functionality from prepare() and create() into private
+  methods and document
+
+0.0.3  Mon Sep 15 2008
 - add missing requires_external_bin 'rpm' to Makefile.PL
 - mark 'SUPER' as required
 

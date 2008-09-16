@@ -27,7 +27,7 @@ use Readonly;
 use Text::Wrap;
 use Template;
 
-our $VERSION = '0.0.3';
+our $VERSION = '0.0.4';
 
 Readonly my $RPMDIR => do { chomp(my $d=qx[ rpm --eval %_topdir ]); $d; };
 Readonly my $PACKAGER => 
@@ -85,7 +85,7 @@ sub init {
     # description: a paragraph summary or so
     $status->mk_accessors(
         qw[ distname distvers extra_files rpmname rpmpath rpmvers rpmdir
-            srpmpath specpath is_noarch license summary description        
+            srpmpath specpath is_noarch license summary description disttop       
           ]
     );
 
@@ -94,6 +94,7 @@ sub init {
 
 sub prepare {
     my ($self, %args) = @_;
+
     my $status = $self->status;               # Private hash
     my $module = $self->parent;               # CPANPLUS::Module
     my $intern = $module->parent;             # CPANPLUS::Internals
@@ -113,57 +114,43 @@ sub prepare {
     $self->SUPER::prepare( %args );
 
     # Compute & store package information
-    #my $distname    = $module->package_name;
-    #$status->distname($distname);
-    $status->distname(my $distname = $module->package_name);
+    my $distname = $status->distname($module->package_name);
+    my $dir      = $status->rpmdir($DIR);
+    my $rpmname  = $status->rpmname($self->_mk_pkg_name);
     $status->distvers($module->package_version);
     $status->summary($self->_module_summary($module));
     $status->description($self->_module_description($module));
     $status->license($self->_module_license($module));
-    #$status->disttop($module->name=~ /([^:]+)::/);
-    my $dir = $status->rpmdir($DIR);
-    $status->rpmvers(1);
+    $status->rpmvers(1);    # FIXME probably need make this malleable
+    $status->is_noarch($self->_is_noarch);
+    $status->disttop($module->name=~ /([^:]+)::/);
 
-    # Cache files
-    my @files = @{ $module->status->files };
-
-    # Handle build/test/requires
-    my $buildreqs = $module->status->prereqs;
-    $buildreqs->{'Module::Build::Compat'} = 0
-        if $self->_is_module_build_compat($module);
-
-    # Files for %doc
-    my @docfiles =
-        grep { /(README|Change(s|log)|LICENSE)$/i }
-        map { basename $_ }
-        @files
-        ;
+    # get various bits of information for the spec file
+    my $buildreqs = $self->_buildreqs; 
+    my $docfiles  = $self->_docfiles;
 
     # Figure out if we're noarch or not
-    $status->is_noarch(do { first { /\.(c|xs)$/i } @files } ? 0 : 1);
 
-    my $rpmname = $self->_mk_pkg_name;
-    $status->rpmname( $rpmname );
-
-    # check whether package has been build.
-    if ( my $pkg = $self->_has_been_built($rpmname, $status->distvers) ) {
+    # check whether package has been built
+    if ($self->_has_been_built) {
         my $modname = $module->module;
-        msg( "already created package for '$modname' at '$pkg'" );
+        msg( "'$rpmname' is already installed (for $modname)" );
 
         if ( not $opts{force} ) {
             msg( "won't re-spec package since --force isn't in use" );
-            # c::d::mdv store
-            $status->rpmpath($pkg); # store the path of rpm
+            # c::d::rpm store
+            #$status->rpmpath($pkg); # store the path of rpm
             # cpanplus api
             $status->prepared(1);
             $status->created(1);
-            $status->dist($pkg);
-            return $pkg;
+            $status->installed(1); # right?
+            $status->dist($rpmname);
+            return $rpmname;
             # XXX check if it works
         }
 
         msg( '--force in use, re-specing anyway' );
-        # FIXME: bump rpm version
+        # FIXME: bump rpm release
     } else {
         msg( "writing specfile for '$distname'..." );
     }
@@ -183,11 +170,9 @@ sub prepare {
             buildreqs => $buildreqs,
             date      => strftime("%a %b %d %Y", localtime),
             packager  => $PACKAGER,
-            docfiles  => join(' ', @docfiles),
+            docfiles  => join(' ', @$docfiles),
 
             packagervers => $VERSION,
-            # s/DISTEXTRA/join( "\n", @{ $status->extra_files || [] })/e;
-            # ... FIXME
         },
         $status->specpath,
     );
@@ -205,6 +190,7 @@ sub prepare {
 
 sub create {
     my ($self, %args) = @_;
+
     my $status = $self->status;               # private hash
     my $module = $self->parent;               # CPANPLUS::Module
     my $intern = $module->parent;             # CPANPLUS::Internals
@@ -233,7 +219,6 @@ sub create {
         msg( 'dry-run build with makemaker...' );
         $self->SUPER::create( %args );
 
-
         my $spec     = $status->specpath;
         my $distname = $status->distname;
         my $rpmname  = $status->rpmname;
@@ -244,7 +229,7 @@ sub create {
         my ($buffer, $success);
         my $dir = $status->rpmdir;
         DRYRUN: {
-            local $ENV{LC_ALL} = 'C';
+            local $ENV{LC_ALL} = 'C'; # FIXME um, why?
             $success = run(
                 #command => "rpmbuild -ba --quiet $spec",
                 command => 
@@ -265,7 +250,7 @@ sub create {
             my ($srpm) = (sort glob "$dir/$rpmname-*.src.rpm")[-1];
             msg( "RPM created successfully: $rpm" );
             msg( "SRPM available: $srpm" );
-            # c::d::mdv store
+            # c::d::rpm store
             $status->rpmpath($rpm);
             $status->srpmpath($srpm);
             # cpanplus api
@@ -307,34 +292,63 @@ sub install {
 #--
 # Private methods:
 
-#
-# my $bool = $self->_has_been_built;
-#
-# Returns true if there's already a package built for this module.
-# 
-sub _has_been_built {
-    my ($self, $name, $vers) = @_;
-    my $pkg = ( sort glob "$RPMDIR/RPMS/*/$name-$vers-*.rpm" )[-1];
-    return $pkg;
-    # FIXME: should we check cooker?
+# generate our hashref of buildreqs
+
+sub _is_noarch {
+    my $self = shift @_;
+ 
+    my @files = @{ $self->parent->status->files };
+    return do { first { /\.(c|xs)$/i } @files } ? 0 : 1;
 }
 
+sub _buildreqs {
+    my $self = shift @_;
+
+    # Handle build/test/requires
+    my $buildreqs = $self->parent->status->prereqs;
+
+    $buildreqs->{'Module::Build::Compat'} = 0
+        if $self->_is_module_build_compat;
+
+    return $buildreqs;
+}
+
+sub _docfiles {
+    my $self = shift @_;
+
+    # FIXME this is really not complete enough    
+    my @docfiles =
+        grep { /(README|Change(s|log)|LICENSE)$/i }
+        map { basename $_ }
+        @{ $self->parent->status->files }
+        ;
+
+    return \@docfiles;
+}
+
+# FIXME: do we want to change this name to be a little more... descriptive? 
+sub _has_been_built {
+    my $self    = shift @_;
+    my $rpmname = shift @_ || $self->status->rpmname;
+
+    #my $pkg = ( sort glob "$RPMDIR/RPMS/*/$name-$vers-*.rpm" )[-1];
+    #return $pkg;
+
+    my $output = `rpm -q $rpmname`;
+    
+    return $output =~ /is not installed/ ? 0 : 1;
+}
 
 sub _is_module_build_compat {
-    my ($self, $module) = @_;
+    my $self   = shift @_;
+    my $module = shift @_ || $self->parent;
+
     my $makefile = $module->_status->extract . '/Makefile.PL';
     my $content  = slurp($makefile);
     return $content =~ /Module::Build::Compat/;
 }
 
 
-#
-# my $name = _mk_pkg_name($dist);
-#
-# given a distribution name, return the name of the mandriva rpm
-# package. in most cases, it will be the same, but some pakcage name
-# will be too long as a rpm name: we'll have to cut it.
-#
 sub _mk_pkg_name {
     my ($self, $dist) = @_;
 
@@ -501,15 +515,12 @@ __[ pod ]__
 
 =head1 NAME
 
-CPANPLUS::Dist::RPM - a cpanplus backend to build RPM/RedHat rpms
-
+CPANPLUS::Dist::RPM - a CPANPLUS backend to build RPM
 
 
 =head1 SYNOPSIS
 
     cpan2dist --format=CPANPLUS::Dist::RPM Some::Random::Package
-
-
 
 =head1 DESCRIPTION
 
@@ -527,7 +538,6 @@ assumed to have the same license as perl and come without support.
 Please always refer to the original CPAN package if you have questions.
 
 
-
 =head1 CLASS METHODS
 
 =head2 $bool = CPANPLUS::Dist::RPM->format_available;
@@ -535,24 +545,22 @@ Please always refer to the original CPAN package if you have questions.
 Return a boolean indicating whether or not you can use this package to
 create and install modules in your environment.
 
-It will verify if you are on a mandriva system, and if you have all the
-necessary components avialable to build your own mandriva packages. You
-will need at least these dependencies installed: C<rpm>, C<rpmbuild> and
-C<gcc>.
-
+It will verify if you have all the necessary components available to build 
+your own rpm packages. You will need at least these dependencies installed: 
+C<rpm>, C<rpmbuild> and C<gcc>.
 
 
 =head1 PUBLIC METHODS
 
-=head2 $bool = $fedora->init;
+=head2 $bool = $rpm->init;
 
-Sets up the C<CPANPLUS::Dist::RPM> object for use. Effectively creates
-all the needed status accessors.
+Sets up the C<CPANPLUS::Dist::RPM> object for use. Creates all the needed 
+status accessors.
 
 Called automatically whenever you create a new C<CPANPLUS::Dist> object.
 
 
-=head2 $bool = $fedora->prepare;
+=head2 $bool = $rpm->prepare;
 
 Prepares a distribution for creation. This means it will create the rpm
 spec file needed to build the rpm and source rpm. This will also satisfy
@@ -564,22 +572,22 @@ since it relies on pod parsing to find those information.
 
 Returns true on success and false on failure.
 
-You may then call C<< $fedora->create >> on the object to create the rpm
-from the spec file, and then C<< $fedora->install >> on the object to
+You may then call C<< $rpm->create >> on the object to create the rpm
+from the spec file, and then C<< $rpm->install >> on the object to
 actually install it.
 
 
-=head2 $bool = $fedora->create;
+=head2 $bool = $rpm->create;
 
 Builds the rpm file from the spec file created during the C<create()>
 step.
 
 Returns true on success and false on failure.
 
-You may then call C<< $fedora->install >> on the object to actually install it.
+You may then call C<< $rpm->install >> on the object to actually install it.
 
 
-=head2 $bool = $fedora->install;
+=head2 $bool = $rpm->install;
 
 Installs the rpm using C<rpm -U>.
 
@@ -588,11 +596,56 @@ B</!\ Work in progress: not implemented.>
 Returns true on success and false on failure
 
 
+=head1 PRIVATE METHODS
+
+These are only documented here as it may be useful to override them.
+
+=head2 _buildreqs
+
+Takes no arguments; returns a hashref of the buildrequires of this module.
+
+=head2 _docfiles
+
+Takes no arguments; returns an arrayref of the files which should be included
+as %doc in the spec.
+
+=head2 _is_noarch
+
+Takes no arguments; returns true if the module is pure-perl; false otherwise.
+
+=head2 _is_module_build_compat
+
+Return true if the Makefile.PL is actually a front for Module::Build.
+
+=head2 _mk_pkg_name
+
+If passed an argument, makes an rpm package name out of it; returns the rpm
+package name of the module we're operating against if none given.
+
+=head2 _module_summary
+
+Get the one-liner summary of the module for %summary.
+
+=head2 _module_description
+
+Get the module's description for %description.
+
+=head2 _module_license
+
+Get the module's license for License:.  Note this is still incomplete;
+currently we only return 'CHECK(GPL+ or Artistic)', the default perl5 license.
+
+=head1 STANDARDS COMPLIANCE
+
+This particular base class does not endeavour to satisfy any Linux
+distribution's packaging guidelines.  It does, however, strive to create
+clean, sane specs and resulting rpm packages.
+
+Until subclassing, users should not be surprised to note a marked similiariaty
+to the Fedora/RedHat Perl packaging guidelines.
+
 
 =head1 TODO
-
-There are no TODOs of a technical nature currently, merely of an
-administrative one;
 
 =over
 
@@ -614,7 +667,6 @@ name of the module.
 =back
 
 
-
 =head1 BUGS
 
 Please report any bugs or feature requests to C<< < bug-CPANPLUS-Dist-RPM at
@@ -628,7 +680,7 @@ on your bug as I make changes.
 =head1 SEE ALSO
 
 L<CPANPLUS::Backend>, L<CPANPLUS::Module>, L<CPANPLUS::Dist>,
-C<cpan2dist>, C<rpm>, C<yum>
+C<cpan2dist>, C<rpm>
 
 
 C<CPANPLUS::Dist::RPM> development takes place at
