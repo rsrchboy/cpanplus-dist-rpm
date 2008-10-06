@@ -12,6 +12,8 @@ use warnings;
 
 use base 'CPANPLUS::Dist::Base';
 
+use English '-no_match_vars';
+
 use Cwd;
 use CPANPLUS::Error; # imported subs: error(), msg()
 use Data::Section -setup;
@@ -27,7 +29,7 @@ use Readonly;
 use Text::Wrap;
 use Template;
 
-our $VERSION = '0.0.4';
+our $VERSION = '0.0.5';
 
 Readonly my $RPMDIR => do { chomp(my $d=qx[ rpm --eval %_topdir ]); $d; };
 Readonly my $PACKAGER => 
@@ -68,8 +70,8 @@ sub format_available {
 # everything went fine.
 #
 sub init {
-    my ($self) = @_;
-    my $status = $self->status; # an Object::Accessor
+    my $self = shift @_;
+
     # distname: Foo-Bar
     # distvers: 1.23
     # extra_files: qw[ /bin/foo /usr/bin/bar ] 
@@ -83,9 +85,11 @@ sub init {
     # license:     try to figure out the actual license
     # summary:     one-liner summary
     # description: a paragraph summary or so
-    $status->mk_accessors(
+
+    $self->status->mk_accessors(
         qw[ distname distvers extra_files rpmname rpmpath rpmvers rpmdir
-            srpmpath specpath is_noarch license summary description disttop       
+            srpmpath specpath is_noarch license summary description 
+            packager
           ]
     );
 
@@ -93,7 +97,8 @@ sub init {
 }
 
 sub prepare {
-    my ($self, %args) = @_;
+    my $self = shift @_;
+    my %opts = $self->_parse_args(@_);
 
     my $status = $self->status;               # Private hash
     my $module = $self->parent;               # CPANPLUS::Module
@@ -101,42 +106,21 @@ sub prepare {
     my $conf   = $intern->configure_object;   # CPANPLUS::Configure
     my $distmm = $module->status->dist_cpan;  # CPANPLUS::Dist::MM
 
-    # Parse args.
-    my %opts = (
-        force   => $conf->get_conf('force'),  # force rebuild
-        perl    => $^X,
-        verbose => $conf->get_conf('verbose'),
-        %args,
-    );
-
     # Dry-run with makemaker: find build prereqs.
     msg( "dry-run prepare with makemaker..." );
-    $self->SUPER::prepare( %args );
+    $self->SUPER::prepare(@_);
 
-    # Compute & store package information
-    my $distname = $status->distname($module->package_name);
-    my $dir      = $status->rpmdir($DIR);
-    my $rpmname  = $status->rpmname($self->_mk_pkg_name);
-    $status->distvers($module->package_version);
-    $status->summary($self->_module_summary($module));
-    $status->description($self->_module_description($module));
-    $status->license($self->_module_license($module));
-    $status->rpmvers(1);    # FIXME probably need make this malleable
-    $status->is_noarch($self->_is_noarch);
-    $status->disttop($module->name=~ /([^:]+)::/);
-
-    # get various bits of information for the spec file
-    my $buildreqs = $self->_buildreqs; 
-    my $docfiles  = $self->_docfiles;
-
-    # Figure out if we're noarch or not
+    # populate our status object
+    $self->_prepare_status;
 
     # check whether package has been built
-    if ($self->_has_been_built) {
-        my $modname = $module->module;
+    if ($self->_package_exists) {
+        my $modname = $self->parent->module;
+        my $rpmname = $status->rpmname;
+
         msg( "'$rpmname' is already installed (for $modname)" );
 
-        if ( not $opts{force} ) {
+        if (!$opts{force}) {
             msg( "won't re-spec package since --force isn't in use" );
             # c::d::rpm store
             #$status->rpmpath($pkg); # store the path of rpm
@@ -151,45 +135,27 @@ sub prepare {
 
         msg( '--force in use, re-specing anyway' );
         # FIXME: bump rpm release
-    } else {
-        msg( "writing specfile for '$distname'..." );
+    } 
+    else {
+        msg( "writing specfile for '$self->distname'..." );
     }
 
-    # Compute & store path of specfile.
-    $status->specpath("$dir/$rpmname.spec");
-
-    # Prepare our template
-    my $tmpl = Template->new({ EVAL_PERL => 1 });
-    
-    # Process template into spec
-    $tmpl->process(
-        $self->section_data('spec'),
-        {
-            status    => $status,
-            module    => $module,
-            buildreqs => $buildreqs,
-            date      => strftime("%a %b %d %Y", localtime),
-            packager  => $PACKAGER,
-            docfiles  => join(' ', @$docfiles),
-
-            packagervers => $VERSION,
-        },
-        $status->specpath,
-    );
+    # create the specfile
+    $self->_prepare_spec;
 
     # copy package.
-    my $tarball = "$dir/" . basename $module->status->fetch;
+    my $tarball = $status->rpmdir . '/' . basename $module->status->fetch;
     copy $module->status->fetch, $tarball;
 
-    msg( "specfile for '$distname' written" );
+    msg "specfile for '" . $status->distname . "' written";
     # return success
-    $status->prepared(1);
-    return 1;
+    return $status->prepared(1);
 }
 
 
 sub create {
-    my ($self, %args) = @_;
+    my $self = shift @_;
+    my %opts = $self->_parse_args(@_);
 
     my $status = $self->status;               # private hash
     my $module = $self->parent;               # CPANPLUS::Module
@@ -197,55 +163,35 @@ sub create {
     my $conf   = $intern->configure_object;   # CPANPLUS::Configure
     my $distmm = $module->status->dist_cpan;  # CPANPLUS::Dist::MM
 
-    # parse args.
-    my %opts = (
-        force   => $conf->get_conf('force'),  # force rebuild
-        perl    => $^X,
-        verbose => $conf->get_conf('verbose'),
-        %args,
-    );
-
     # check if we need to rebuild package.
-    if ( $status->created && defined $status->dist ) {
+    if ($status->created && defined $status->dist) {
         if ( not $opts{force} ) {
-            msg( "won't re-build package since --force isn't in use" );
+            msg "won't re-build package since --force isn't in use";
             return $status->dist;
         }
-        msg( '--force in use, re-building anyway' );
+        msg '--force in use, re-building anyway';
     }
 
     RPMBUILD: {
         # dry-run with makemaker: handle prereqs.
-        msg( 'dry-run build with makemaker...' );
-        $self->SUPER::create( %args );
+        msg 'dry-run build with makemaker...';
+        #$self->SUPER::create(%args);
+        $self->SUPER::create(@_);
 
         my $spec     = $status->specpath;
         my $distname = $status->distname;
         my $rpmname  = $status->rpmname;
+        my $dir      = $status->rpmdir;
 
-        msg( "Building '$distname' from specfile $spec..." );
+        msg "Building '$distname' from specfile $spec...";
 
-        # dry-run, to see if we forgot some files
-        my ($buffer, $success);
-        my $dir = $status->rpmdir;
-        DRYRUN: {
-            local $ENV{LC_ALL} = 'C'; # FIXME um, why?
-            $success = run(
-                #command => "rpmbuild -ba --quiet $spec",
-                command => 
-                    'rpmbuild -ba '
-                    . qq{--define '_sourcedir $dir' }
-                    . qq{--define '_builddir $dir'  }
-                    . qq{--define '_srcrpmdir $dir' }
-                    . qq{--define '_rpmdir $dir'    }
-                    . $spec,
-                verbose => $opts{verbose},
-                buffer  => \$buffer,
-            );
-        }
+        # run rpmbuild
+        my ($success, $buffer) = $self->_build_rpm(@_);
 
         # check if the dry-run finished correctly
-        if ( $success ) {
+        if ($success) {
+
+            # FIXME we may have multiple RPMs.
             my ($rpm)  = (sort glob "$dir/*/$rpmname-*.rpm")[-1];
             my ($srpm) = (sort glob "$dir/$rpmname-*.src.rpm")[-1];
             msg( "RPM created successfully: $rpm" );
@@ -256,44 +202,192 @@ sub create {
             # cpanplus api
             $status->created(1);
             $status->dist($rpm);
-            return $rpm;
+            last RPMBUILD;
         }
 
-        # unknown error, aborting.
-        if ( not $buffer =~ /^\s+Installed .but unpackaged. file.s. found:\n(.*)\z/ms ) {
-            error( "Failed to create RPM package for '$distname': $buffer" );
-            # cpanplus api
+        $success = $self->_handle_rpmbuild_error(
+            success => $success, 
+            buffer  => $buffer,
+            @_
+        );
+
+        if (not $success) {
+            
+            # unknown error, aborting.
+            error "Failed to create RPM package for '$distname': $buffer";
             $status->created(0);
-            return;
+            last RPMBUILD;
         }
 
+        redo RPMBUILD;
+    }
+
+    return $status->created;
+}
+
+sub install {
+    my $self = shift @_;
+    my %opts = $self->_parse_args(@_);
+
+    #my $rpm = $self->status->rpm;
+    my $rpmcmd = 'rpm -ivh ' . $self->status->rpmpath;
+
+    if ($EUID != 0) {
+
+        msg 'trying to invoke rpm via sudo';
+
+        $rpmcmd = "sudo $rpmcmd";
+    }
+    
+    my $buffer;
+    my $success = run(
+        command => $rpmcmd,
+        verbose => $opts{verbose},
+        buffer  => \$buffer,
+    );
+
+    if (not $success) {
+
+        error "error installing! ($success)";
+        printf STDERR $buffer;
+        #die;
+        return $self->status->installed(0);
+    }
+
+    return $self->status->installed(1);
+}
+
+##################################################################
+# prepare (private methods)
+
+#--
+# Private methods:
+
+sub _prepare_spec {
+    my $self = shift @_;
+    
+    # Prepare our template
+    #my $tmpl = Template->new({ EVAL_PERL => 1 });
+    my $tmpl = Template->new;
+    
+    # Process template into spec
+    $tmpl->process(
+        $self->section_data('spec'),
+        {
+            status    => $self->status,
+            module    => $self->parent,
+            buildreqs => $self->_buildreqs,
+            date      => strftime("%a %b %d %Y", localtime),
+            packager  => $PACKAGER,
+            docfiles  => join(' ', @{ $self->_docfiles }),
+
+            packagervers => $VERSION,
+        },
+        $self->status->specpath,
+    );
+}
+
+sub _package_exists {
+    my $self    = shift @_;
+    my $rpmname = shift @_ || $self->status->rpmname;
+
+    #my $pkg = ( sort glob "$RPMDIR/RPMS/*/$name-$vers-*.rpm" )[-1];
+    #return $pkg;
+
+    my $output = `rpm -q $rpmname`;
+    
+    return $output =~ /is not installed/ ? 0 : 1;
+}
+
+sub _prepare_status {
+    my $self = shift @_;
+
+    my $status = $self->status;               # Private hash
+    my $module = $self->parent;               # CPANPLUS::Module
+    my $intern = $module->parent;             # CPANPLUS::Internals
+    my $conf   = $intern->configure_object;   # CPANPLUS::Configure
+    my $distmm = $module->status->dist_cpan;  # CPANPLUS::Dist::MM
+
+    # Compute & store package information
+    $status->distname($module->package_name);
+    $status->rpmdir($DIR);
+    $status->rpmname($self->_mk_pkg_name);
+    $status->distvers($module->package_version);
+    $status->summary($self->_module_summary($module));
+    $status->description($self->_module_description($module));
+    $status->license($self->_module_license($module));
+    $status->rpmvers(1);    # FIXME probably need make this malleable
+    $status->is_noarch($self->_is_noarch);
+    $status->specpath($status->rpmdir . '/' . $status->rpmname . '.spec');
+
+    return;
+}
+
+##################################################################
+# create (private methods)
+
+sub _build_rpm {
+    my $self = shift @_;
+    my %opts = $self->_parse_args(@_);
+
+    my ($buffer, $success);
+    my $dir = $self->status->rpmdir;
+
+    #local $ENV{LC_ALL} = 'C'; # FIXME um, why?
+
+    $success = run(
+        #command => "rpmbuild -ba --quiet $spec",
+        command => 'rpmbuild -ba '
+            . qq{--define '_sourcedir $dir' }
+            . qq{--define '_builddir $dir'  }
+            . qq{--define '_srcrpmdir $dir' }
+            . qq{--define '_rpmdir $dir'    }
+            . $self->specpath,
+        verbose => $opts{verbose},
+        buffer  => \$buffer,
+    );
+
+    return ($success, $buffer);
+}
+
+sub _handle_rpmbuild_error {
+    my $self = shift @_;
+    my %opts = $self->_parse_args(@_);
+
+    my $unpackaged_re =
+        qr/^\s+Installed .but unpackaged. file.s. found:\n(.*)\z/ms;
+
+    if (not $opts{buffer} =~ $unpackaged_re ) {
         # additional files to be packaged
         msg( "extra files installed, fixing spec file" );
         my $files = $1;
         $files =~ s/^\s+//mg; # remove spaces
         my @files = split /\n/, $files;
-        $status->extra_files( \@files );
-        $self->prepare( %opts, force => 1 );
-        msg( 'restarting build phase' );
-        redo RPMBUILD;
+        $self->status->extra_files(\@files);
+        $self->prepare(%opts, force => 1);
+        return 1;
     }
+
+    return 0;
 }
 
-sub install {
-    my ($self, %args) = @_;
-    my $rpm = $self->status->rpm;
-    error( "installing $rpm" );
-    die;
-    #$dist->status->installed
+sub _parse_args {
+    my $self = shift @_;
+    my %args = @_;
+    my $conf = $self->parent->parent->configure_object;
+
+    # parse args.
+    my %opts = (
+        force   => $conf->get_conf('force'),  # force rebuild
+        perl    => $^X,
+        verbose => $conf->get_conf('verbose'),
+        %args,
+    );
+
+    return %args;
 }
 
-
-
-#--
-# Private methods:
-
-# generate our hashref of buildreqs
-
+# quickly determine if the module is pure-perl (noarch) or not
 sub _is_noarch {
     my $self = shift @_;
  
@@ -301,6 +395,7 @@ sub _is_noarch {
     return do { first { /\.(c|xs)$/i } @files } ? 0 : 1;
 }
 
+# generate our hashref of buildreqs
 sub _buildreqs {
     my $self = shift @_;
 
@@ -318,25 +413,12 @@ sub _docfiles {
 
     # FIXME this is really not complete enough    
     my @docfiles =
-        grep { /(README|Change(s|log)|LICENSE)$/i }
+        grep { /(README|Change(s|log)|LICENSE|Copyright)$/i }
         map { basename $_ }
         @{ $self->parent->status->files }
         ;
 
     return \@docfiles;
-}
-
-# FIXME: do we want to change this name to be a little more... descriptive? 
-sub _has_been_built {
-    my $self    = shift @_;
-    my $rpmname = shift @_ || $self->status->rpmname;
-
-    #my $pkg = ( sort glob "$RPMDIR/RPMS/*/$name-$vers-*.rpm" )[-1];
-    #return $pkg;
-
-    my $output = `rpm -q $rpmname`;
-    
-    return $output =~ /is not installed/ ? 0 : 1;
 }
 
 sub _is_module_build_compat {
@@ -374,25 +456,31 @@ sub _module_license { return $DEFAULT_LICENSE; }
 sub _module_description {
     my ($self, $module) = @_;
 
-    my $path = dirname $module->_status->extract; # where tarball has been extracted
+    # where tarball has been extracted
+    my $path   = dirname $module->_status->extract;
+    my $parser = Pod::POM->new;
+
     my @docfiles =
         map  { "$path/$_" }               # prepend extract directory
-        sort { length $a <=> length $b }  # sort by length: we prefer top-level module description
-        grep { /\.(pod|pm)$/ }            # filter out those that can contain pod
+        sort { length $a <=> length $b }  # sort by length
+        grep { /\.(pod|pm)$/ }            # filter potentially pod-containing
         @{ $module->_status->files };     # list of embedded files
 
     # parse file, trying to find a header
-    my $parser = Pod::POM->new;
     DOCFILE:
     foreach my $docfile ( @docfiles ) {
+
         my $pom = $parser->parse_file($docfile);  # try to find some pod
-        next DOCFILE unless defined $pom;         # the file may contain no pod, that's ok
+
+        # the file may contain no pod, that's ok
+        next DOCFILE unless defined $pom; 
+
         HEAD1:
         foreach my $head1 ($pom->head1) {
             next HEAD1 unless $head1->title eq 'DESCRIPTION';
-            my $pom  = $head1->content;                         # get pod for DESCRIPTION paragraph
-            my $text = $pom->present('Pod::POM::View::Text');   # transform pod to text
-            my @paragraphs = (split /\n\n/, $text)[0..2];       # only the 3 first paragraphs
+            my $pom  = $head1->content;
+            my $text = $pom->present('Pod::POM::View::Text');
+            my @paragraphs = (split /\n\n/, $text)[0..2]; 
             return join "\n\n", @paragraphs;
         }
     }
@@ -453,7 +541,7 @@ Summary:    [% status.summary %]
 Source:     http://search.cpan.org/CPAN/[% module.path %]/[% status.distname %]-%{version}.[% module.package_extension %] 
 Url:        http://search.cpan.org/dist/[% status.distname %]
 BuildRoot:  %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n) 
-Requires:  perl(:MODULE_COMPAT_%(eval "`%{__perl} -V:version`"; echo $version))
+Requires:   perl(:MODULE_COMPAT_%(eval "`%{__perl} -V:version`"; echo $version))
 [% IF status.is_noarch %]BuildArch:  noarch[% END -%]
 
 BuildRequires: perl(ExtUtils::MakeMaker) 
@@ -600,33 +688,47 @@ Returns true on success and false on failure
 
 These are only documented here as it may be useful to override them.
 
-=head2 _buildreqs
+=head2 _prepare_status()
+
+Prepare our $status.
+
+=head2 _prepare_spec()
+
+Generate and write out the spec file.
+
+=head2 _package_exists()
+
+Checks to see if an RPM for this module is already installed on the system.
+Note that we only check the rpmdb; we leave checking package repos to
+distribution-specific subclasses.
+
+=head2 _buildreqs()
 
 Takes no arguments; returns a hashref of the buildrequires of this module.
 
-=head2 _docfiles
+=head2 _docfiles()
 
 Takes no arguments; returns an arrayref of the files which should be included
 as %doc in the spec.
 
-=head2 _is_noarch
+=head2 _is_noarch()
 
 Takes no arguments; returns true if the module is pure-perl; false otherwise.
 
-=head2 _is_module_build_compat
+=head2 _is_module_build_compat()
 
 Return true if the Makefile.PL is actually a front for Module::Build.
 
-=head2 _mk_pkg_name
+=head2 _mk_pkg_name()
 
 If passed an argument, makes an rpm package name out of it; returns the rpm
 package name of the module we're operating against if none given.
 
-=head2 _module_summary
+=head2 _module_summary()
 
 Get the one-liner summary of the module for %summary.
 
-=head2 _module_description
+=head2 _module_description()
 
 Get the module's description for %description.
 
