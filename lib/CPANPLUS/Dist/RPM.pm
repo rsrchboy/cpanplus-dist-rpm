@@ -316,7 +316,7 @@ sub _prepare_status {
     $status->summary($self->_module_summary($module));
     $status->description($self->_module_description($module));
     $status->license($self->_module_license($module));
-    $status->rpmvers(1);    # FIXME probably need make this malleable
+    $status->rpmvers('0.1');    # FIXME probably need make this malleable
     $status->is_noarch($self->_is_noarch);
     $status->specpath($status->rpmdir . '/' . $status->rpmname . '.spec');
 
@@ -342,7 +342,7 @@ sub _build_rpm {
             . qq{--define '_builddir $dir'  }
             . qq{--define '_srcrpmdir $dir' }
             . qq{--define '_rpmdir $dir'    }
-            . $self->specpath,
+            . $self->status->specpath,
         verbose => $opts{verbose},
         buffer  => \$buffer,
     );
