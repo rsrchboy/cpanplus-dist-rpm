@@ -1,5 +1,11 @@
 Revision history for CPANPLUS-Dist-RPM
 
+0.0.6 Thu Dec 4 2008
+- try to refine "unpackaged files not found" logic -- still broken
+- try to get specpath from our status, not self
+- drop rpm release to 0.1: if a repository we use releases a -1 of it, we want
+  their version to be "newer" than our generated version
+
 0.0.5  Sun Oct  5 2008
 - additional methods split out
 - update install() to look at using sudo (not quite sold on this yet)

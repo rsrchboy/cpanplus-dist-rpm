@@ -29,7 +29,7 @@ use Readonly;
 use Text::Wrap;
 use Template;
 
-our $VERSION = '0.0.5';
+our $VERSION = '0.0.6';
 
 Readonly my $RPMDIR => do { chomp(my $d=qx[ rpm --eval %_topdir ]); $d; };
 Readonly my $PACKAGER => 
@@ -354,10 +354,20 @@ sub _handle_rpmbuild_error {
     my $self = shift @_;
     my %opts = $self->_parse_args(@_);
 
+    # error: Failed build dependencies:
+    #    perl(App::Cmd) is needed by perl-MooseX-App-Cmd-0.04-0.1.fc9.noarch
+
+    my $builddep = qr/^error: Failed build dependencies/;
+    
+    # error: Installed (but unpackaged) file(s) found:
+    #   /usr/bin/pm_which
+    #   /usr/share/man/man1/pm_which.1.gz
+
+
     my $unpackaged_re =
         qr/^\s+Installed .but unpackaged. file.s. found:\n(.*)\z/ms;
 
-    if (not $opts{buffer} =~ $unpackaged_re ) {
+    if ($opts{buffer} =~ $unpackaged_re ) {
         # additional files to be packaged
         msg( "extra files installed, fixing spec file" );
         my $files = $1;
@@ -366,6 +376,10 @@ sub _handle_rpmbuild_error {
         $self->status->extra_files(\@files);
         $self->prepare(%opts, force => 1);
         return 1;
+    }
+    elsif ($opts{buffer} =~ $builddep) {
+
+        error "unsatisfied builddeps!\n\n$opts{buffer}\n";
     }
 
     return 0;
