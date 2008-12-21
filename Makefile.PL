@@ -16,18 +16,18 @@ requires 'CPANPLUS::Error';
 requires 'Data::Section';
 requires 'File::Basename';
 requires 'File::Copy';
-requires 'File::Slurp';
+requires 'File::Find::Rule';
 requires 'IPC::Cmd';
 requires 'List::Util';
+requires 'Path::Class';
 requires 'Pod::POM';
 requires 'Pod::POM::View::Text';
 requires 'POSIX';
 requires 'Readonly';
+requires 'Software::License' => '0.008';
 requires 'SUPER';
-requires 'Text::Wrap';
+requires 'Text::Autoformat';
 requires 'Template';
-# not implemented yet
-#requires 'Software::License';
 
 requires_external_bin 'gcc';
 requires_external_bin 'rpm';

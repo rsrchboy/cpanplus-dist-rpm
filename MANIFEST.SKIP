@@ -1,0 +1,16 @@
+blib
+pm_to_blib
+MANIFEST.bak
+MANIFEST.SKIP
+MANIFEST.SKIP~
+cover_db
+Makefile$
+Makefile.old$
+CPANPLUS-Dist-RPM.*
+\.swp$
+\.bak$
+\.orig$
+\.new$
+\.tar\.gz$
+foo
+\.svn

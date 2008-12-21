@@ -25,16 +25,18 @@ requires:
   Data::Section: 0
   File::Basename: 0
   File::Copy: 0
-  File::Slurp: 0
+  File::Find::Rule: 0
   IPC::Cmd: 0
   List::Util: 0
   POSIX: 0
+  Path::Class: 0
   Pod::POM: 0
   Pod::POM::View::Text: 0
   Readonly: 0
   SUPER: 0
+  Software::License: 0.008
   Template: 0
-  Text::Wrap: 0
+  Text::Autoformat: 0
 resources:
   license: http://dev.perl.org/licenses/
-version: 0.0.5
+version: 0.0.7

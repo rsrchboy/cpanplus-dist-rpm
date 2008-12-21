@@ -1,6 +1,11 @@
 Revision history for CPANPLUS-Dist-RPM
 
-0.0.6 Thu Dec 4 2008
+0.0.7 Sat Dec 20 2008
+- start using Software::License to guess at licenses
+- fixup extra file processing -- was infinitely looping on extra files.  This
+  should take care of RT#41553 and RT#41722.
+
+0.0.6 Thu Dec  4 2008
 - try to refine "unpackaged files not found" logic -- still broken
 - try to get specpath from our status, not self
 - drop rpm release to 0.1: if a repository we use releases a -1 of it, we want

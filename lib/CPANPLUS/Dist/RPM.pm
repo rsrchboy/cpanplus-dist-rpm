@@ -14,22 +14,30 @@ use base 'CPANPLUS::Dist::Base';
 
 use English '-no_match_vars';
 
+# imports error(), msg()
+use CPANPLUS::Error; 
+
 use Cwd;
-use CPANPLUS::Error; # imported subs: error(), msg()
 use Data::Section -setup;
 use File::Basename;
-use File::Copy      qw[ copy ];
-use File::Slurp     qw[ slurp ];
-use IPC::Cmd        qw[ run can_run ];
-use List::Util      qw[ first ];
+use File::Copy       qw{ copy };
+use File::Find::Rule;
+use IPC::Cmd         qw{ run can_run };
+use List::Util       qw{ first };
+use List::MoreUtils  qw{ uniq };
+use Path::Class;
 use Pod::POM;
 use Pod::POM::View::Text;
-use POSIX qw[ strftime ];
+use POSIX           qw{ strftime };
 use Readonly;
-use Text::Wrap;
+use Software::LicenseUtils;
+use Text::Autoformat;
 use Template;
 
-our $VERSION = '0.0.6';
+our $VERSION = '0.0.7';
+
+# debugging
+#use Smart::Comments '###', '####';
 
 Readonly my $RPMDIR => do { chomp(my $d=qx[ rpm --eval %_topdir ]); $d; };
 Readonly my $PACKAGER => 
@@ -51,9 +59,10 @@ sub format_available {
     my $flag;
 
     # check prereqs
-    for my $prog ( qw[ rpm rpmbuild gcc ] ) {
+    for my $prog ( qw{ rpm rpmbuild gcc } ) {
+
         next if can_run($prog);
-        error( "'$prog' is a required program to build RPM packages" );
+        error "'$prog' is a required program to build RPM packages";
         $flag++;
     }
 
@@ -72,6 +81,7 @@ sub format_available {
 sub init {
     my $self = shift @_;
 
+    # e.g...
     # distname: Foo-Bar
     # distvers: 1.23
     # extra_files: qw[ /bin/foo /usr/bin/bar ] 
@@ -87,10 +97,11 @@ sub init {
     # description: a paragraph summary or so
 
     $self->status->mk_accessors(
-        qw[ distname distvers extra_files rpmname rpmpath rpmvers rpmdir
-            srpmpath specpath is_noarch license summary description 
-            packager
-          ]
+        qw{ 
+            distname distvers extra_files rpmname rpmpath rpmvers 
+            rpmdir srpmpath specpath is_noarch license summary 
+            description packager license_comment
+          }
     );
 
     return 1;
@@ -260,9 +271,6 @@ sub install {
 ##################################################################
 # prepare (private methods)
 
-#--
-# Private methods:
-
 sub _prepare_spec {
     my $self = shift @_;
     
@@ -314,11 +322,14 @@ sub _prepare_status {
     $status->rpmname($self->_mk_pkg_name);
     $status->distvers($module->package_version);
     $status->summary($self->_module_summary($module));
-    $status->description($self->_module_description($module));
-    $status->license($self->_module_license($module));
-    $status->rpmvers('0.1');    # FIXME probably need make this malleable
+    $status->description(autoformat $self->_module_description($module));
+    $status->rpmvers('0');    # FIXME probably need make this malleable
     $status->is_noarch($self->_is_noarch);
     $status->specpath($status->rpmdir . '/' . $status->rpmname . '.spec');
+
+    # _module_license sets both license and license_comment
+    #$status->license($self->_module_license($module));
+    $self->_module_license($module);
 
     return;
 }
@@ -363,16 +374,30 @@ sub _handle_rpmbuild_error {
     #   /usr/bin/pm_which
     #   /usr/share/man/man1/pm_which.1.gz
 
+    # often from tests:  cannot open display
 
     my $unpackaged_re =
         qr/^\s+Installed .but unpackaged. file.s. found:\n(.*)\z/ms;
+        #qr/Installed .but unpackaged. file.s. found/;
 
     if ($opts{buffer} =~ $unpackaged_re ) {
-        # additional files to be packaged
-        msg( "extra files installed, fixing spec file" );
+
+        # additional files need to be packaged
+        msg 'Installed but unpackaged files found, fixing spec file';
+
+        # massage into a filelist we want...
         my $files = $1;
         $files =~ s/^\s+//mg; # remove spaces
         my @files = split /\n/, $files;
+
+        # FIXME this isn't going to work where _docdir != /usr/bin
+        @files = 
+            map { $_ =~ s!^/usr/bin!%{_bindir}!;       $_ }
+            map { $_ =~ s!^/usr/share/man!%{_mandir}!; $_ }
+            @files
+            ;
+
+        ### @files
         $self->status->extra_files(\@files);
         $self->prepare(%opts, force => 1);
         return 1;
@@ -439,11 +464,11 @@ sub _is_module_build_compat {
     my $self   = shift @_;
     my $module = shift @_ || $self->parent;
 
-    my $makefile = $module->_status->extract . '/Makefile.PL';
-    my $content  = slurp($makefile);
+    my $makefile = file $module->_status->extract . '/Makefile.PL';
+    my $content  = $makefile->slurp;
+
     return $content =~ /Module::Build::Compat/;
 }
-
 
 sub _mk_pkg_name {
     my ($self, $dist) = @_;
@@ -456,9 +481,116 @@ sub _mk_pkg_name {
 
 # determine the module license. 
 #
-# FIXME! for now just return $DEFAULT_LICENSE
+# FIXME! Look for 'LICENSE' / 'Copying' / etc files
 
-sub _module_license { return $DEFAULT_LICENSE; }
+# right now we use the Fedora shortnames, for lack of anything more generic.
+#
+# see http://fedoraproject.org/wiki/Licensing#Good_Licenses
+
+my %shortname = (
+
+    # classname                         => shortname
+    'Software::License::AGPL_3'         => 'AGPLv3',
+    'Software::License::Apache_1_1'     => 'ASL 1.1',
+    'Software::License::Apache_2_0'     => 'ASL 2.0',
+    'Software::License::Artistic_1_0'   => 'Artistic',
+    'Software::License::Artistic_2_0'   => 'Artistic 2.0',
+    'Software::License::BSD'            => 'BSD',
+    'Software::License::FreeBSD'        => 'BSD',
+    'Software::License::GFDL_1_2'       => 'GFDL',
+    'Software::License::GPL_1'          => 'GPL',
+    'Software::License::GPL_2'          => 'GPLv2',
+    'Software::License::GPL_3'          => 'GPLv3',
+    'Software::License::LGPL_2_1'       => 'LGPLv2',
+    'Software::License::LGPL_3_0'       => 'LGPLv3',
+    'Software::License::MIT'            => 'MIT',
+    'Software::License::Mozilla_1_0'    => 'MPLv1.0',
+    'Software::License::Mozilla_1_1'    => 'MPLv1.1',
+    'Software::License::Perl_5'         => 'GPL+ or Artistic',
+    'Software::License::QPL_1_0'        => 'QPL',
+    'Software::License::Sun'            => 'SPL',
+    'Software::License::Zlib'           => 'zlib',
+);
+
+sub _module_license { 
+    my $self = shift @_;
+
+    my $module = $self->parent;
+    
+    my $lic_comment = q{};
+    
+    # First, check what CPAN says
+    my $cpan_lic = $module->details->{'Public License'};
+
+    ### $cpan_lic
+
+    # then, check META.yml (if existing)
+    my $extract_dir = dir $module->extract;
+    my $meta_file   = file $extract_dir, 'META.yml';
+    my @meta_lics;
+
+    if (-e "$meta_file" && -r _) {
+
+        my $meta = $meta_file->slurp;
+        @meta_lics = 
+            Software::LicenseUtils->guess_license_from_meta_yml($meta);
+    }
+        
+    # FIXME we pretty much just ignore the META.yml license right now
+
+    ### @meta_lics
+
+    # then, check the pod in all found .pm/.pod's
+    my $rule = File::Find::Rule->new;
+    my @pms = File::Find::Rule
+        ->or(
+            File::Find::Rule->new->directory->name('blib')->prune->discard,
+            File::Find::Rule->new->file->name('*.pm', '*.pod')
+            )
+        ->in($extract_dir)
+        ;
+
+    my %pm_lics;
+
+    for my $file (@pms) {
+
+        $file = file $file;
+        #my $text = file($file)->slurp;
+        my $text = $file->slurp;
+        my @lics = Software::LicenseUtils->guess_license_from_pod($text);
+
+        ### file: "$file"
+        ### @lics
+        
+        #push @pm_lics, @lics;
+        $pm_lics{$file->relative($extract_dir)} = [ @lics ]
+            if @lics > 0;
+    }
+
+    ### %pm_lics
+
+    my @lics;
+
+    for my $file (sort keys %pm_lics) {
+
+       my @file_lics = map { $shortname{$_} } @{$pm_lics{"$file"}};
+
+       $lic_comment .= "# $file -> " . join(q{, }, @file_lics) . "\n";
+       push @lics, @file_lics;
+    }
+
+    # FIXME need to sort out the licenses here
+    @lics = uniq @lics;
+
+    ### $lic_comment
+    ### @lics
+
+    $self->status->license(join(' or ', @lics));
+    $self->status->license_comment($lic_comment);
+
+    ### license: $self->status->license
+    return;
+}
 
 #
 # my $description = _module_description($module);
@@ -480,22 +612,32 @@ sub _module_description {
         grep { /\.(pod|pm)$/ }            # filter potentially pod-containing
         @{ $module->_status->files };     # list of embedded files
 
+    my $desc;
+
     # parse file, trying to find a header
     DOCFILE:
     foreach my $docfile ( @docfiles ) {
 
-        my $pom = $parser->parse_file($docfile);  # try to find some pod
-
-        # the file may contain no pod, that's ok
+        # extract pod; the file may contain no pod, that's ok
+        my $pom = $parser->parse_file($docfile);
         next DOCFILE unless defined $pom; 
 
         HEAD1:
         foreach my $head1 ($pom->head1) {
+
             next HEAD1 unless $head1->title eq 'DESCRIPTION';
+
             my $pom  = $head1->content;
             my $text = $pom->present('Pod::POM::View::Text');
+            
+            # limit to 3 paragraphs at the moment
             my @paragraphs = (split /\n\n/, $text)[0..2]; 
-            return join "\n\n", @paragraphs;
+            #$text = join "\n\n", @paragraphs;
+            $text = q{};
+            for my $para (@paragraphs) { $text .= $para }
+
+            # autoformat and return...
+            return autoformat $text, { all => 1 };
         }
     }
 
@@ -515,21 +657,25 @@ sub _module_summary {
     # registered modules won't go farther...
     return $module->description if $module->description;
 
-    my $path = dirname $module->_status->extract; # where tarball has been extracted
+    my $path = dirname $module->_status->extract;
+
     my @docfiles =
         map  { "$path/$_" }               # prepend extract directory
-        sort { length $a <=> length $b }  # sort by length: we prefer top-level module summary
-        grep { /\.(pod|pm)$/ }            # filter out those that can contain pod
+        sort { length $a <=> length $b }  # we prefer top-level module summary
+        grep { /\.(pod|pm)$/ }            
         @{ $module->_status->files };     # list of files embedded
 
     # parse file, trying to find a header
     my $parser = Pod::POM->new;
     DOCFILE:
     foreach my $docfile ( @docfiles ) {
-        my $pom = $parser->parse_file($docfile);  # try to find some pod
-        next unless defined $pom;                 # the file may contain no pod, that's ok
+
+        my $pom = $parser->parse_file($docfile);  
+        next unless defined $pom;                 # no pod, that's ok
+    
         HEAD1:
         foreach my $head1 ($pom->head1) {
+
             my $title = $head1->title;
             next HEAD1 unless $title eq 'NAME';
             my $content = $head1->content;
@@ -545,10 +691,10 @@ sub _module_summary {
 
 __DATA__
 __[ spec ]__
-
 Name:       [% status.rpmname %] 
 Version:    [% status.distvers %] 
 Release:    [% status.rpmvers %]%{?dist}
+[% status.license_comment -%]
 License:    [% status.license %] 
 Group:      Development/Libraries
 Summary:    [% status.summary %] 
@@ -556,9 +702,8 @@ Source:     http://search.cpan.org/CPAN/[% module.path %]/[% status.distname %]-
 Url:        http://search.cpan.org/dist/[% status.distname %]
 BuildRoot:  %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n) 
 Requires:   perl(:MODULE_COMPAT_%(eval "`%{__perl} -V:version`"; echo $version))
-[% IF status.is_noarch %]BuildArch:  noarch[% END -%]
+[% IF status.is_noarch %]BuildArch:  noarch[% END %]
 
-BuildRequires: perl(ExtUtils::MakeMaker) 
 [% brs = buildreqs; FOREACH br = brs.keys.sort -%]
 BuildRequires: perl([% br %])[% IF (brs.$br != 0) %] >= [% brs.$br %][% END %]
 [% END -%]
@@ -607,6 +752,9 @@ rm -rf %{buildroot}
 %exclude %dir %{perl_vendorarch}/auto
 [% END -%]
 %{_mandir}/man3/*.3*
+[% FOREACH file = status.extra_files -%]
+[% file %]
+[% END -%]
 
 %changelog
 * [% date %] [% packager %] [% status.distvers %]-[% status.rpmvers %]
@@ -748,8 +896,9 @@ Get the module's description for %description.
 
 =head2 _module_license
 
-Get the module's license for License:.  Note this is still incomplete;
-currently we only return 'CHECK(GPL+ or Artistic)', the default perl5 license.
+Get the module's license for License:.  Note that while this is still
+incomplete, we now use L<Software::License> to try to figure out the correct
+license from the .pm/.pod files.
 
 =head1 STANDARDS COMPLIANCE
 
@@ -757,20 +906,18 @@ This particular base class does not endeavour to satisfy any Linux
 distribution's packaging guidelines.  It does, however, strive to create
 clean, sane specs and resulting rpm packages.
 
-Until subclassing, users should not be surprised to note a marked similiariaty
+Until subclassing, users should not be surprised to note a marked similarity
 to the Fedora/RedHat Perl packaging guidelines.
-
 
 =head1 TODO
 
 =over
 
-=item o Scan for proper license
+=item o Deeper scan for proper license
 
-Right now we assume that the license of every module is C<the same
-as perl itself>. Although correct in almost all cases, it should 
-really be probed rather than assumed.
-
+We do use L<Software::License> to scan any .pm/.pod files.  However, we could
+and should be checking META.yml and any COPYING/LICENSE files that happen to
+be bundled.
 
 =item o Long description
 
