@@ -34,7 +34,7 @@ use Software::LicenseUtils;
 use Text::Autoformat;
 use Template;
 
-our $VERSION = '0.0.7';
+our $VERSION = '0.0.8';
 
 # debugging
 #use Smart::Comments '###', '####';

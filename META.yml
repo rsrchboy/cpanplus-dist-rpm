@@ -27,6 +27,7 @@ requires:
   File::Copy: 0
   File::Find::Rule: 0
   IPC::Cmd: 0
+  List::MoreUtils: 0
   List::Util: 0
   POSIX: 0
   Path::Class: 0
@@ -39,4 +40,4 @@ requires:
   Text::Autoformat: 0
 resources:
   license: http://dev.perl.org/licenses/
-version: 0.0.7
+version: 0.0.8

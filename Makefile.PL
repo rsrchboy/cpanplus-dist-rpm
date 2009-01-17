@@ -19,6 +19,7 @@ requires 'File::Copy';
 requires 'File::Find::Rule';
 requires 'IPC::Cmd';
 requires 'List::Util';
+requires 'List::MoreUtils';
 requires 'Path::Class';
 requires 'Pod::POM';
 requires 'Pod::POM::View::Text';
