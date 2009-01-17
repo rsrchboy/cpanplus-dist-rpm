@@ -585,8 +585,16 @@ sub _module_license {
     ### $lic_comment
     ### @lics
 
-    $self->status->license(join(' or ', @lics));
-    $self->status->license_comment($lic_comment);
+    if (@lics > 0) {
+
+        $self->status->license(join(' or ', @lics));
+        $self->status->license_comment($lic_comment);
+    }
+    else {
+        
+        $self->status->license($DEFAULT_LICENSE);
+        $self->status->license_comment("# license auto-determination failed\n");
+    }
 
     ### license: $self->status->license
     return;
